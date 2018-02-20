@@ -46,22 +46,7 @@ namespace c1g1c
                 _source = Encoding.UTF8.GetBytes(src);
                 _enm = enm;
             }
-
-            long _srcPtr;
-            long _outPtr;
             private bool _built;
-
-            void Add(Match match, char[] evalResult)
-            {
-                var evalBytes = DefaultEncoding.GetBytes(evalResult);
-                Array.Copy(_source, _srcPtr, _output, _outPtr, match.Index - _srcPtr);
-                _outPtr += match.Index - _srcPtr;
-
-                Array.Copy(evalBytes, 0, _output, _outPtr, evalBytes.Length);
-                _outPtr += evalBytes.Length;
-
-                _srcPtr = match.Index + match.Value.Length;
-            }
 
             public override string ToString()
             {
@@ -78,15 +63,25 @@ namespace c1g1c
                 var newOutputLength = (_source.Length - evalsLength) + evalResultsLength;
                 _output = new byte[newOutputLength];
 
+                long srcPtr = 0;
+                long outPtr = 0;
                 var e = _enm.GetEnumerator();
                 while (e.MoveNext())
                 {
-                    (Match match, char[] taskResult) = e.Current;
-                    Add(match, taskResult);
+                    (Match match, char[] evalResult) = e.Current;
+                    var evalBytes = DefaultEncoding.GetBytes(evalResult);
+
+                    Array.Copy(_source, srcPtr, _output, outPtr, match.Index - srcPtr);
+                    outPtr += match.Index - srcPtr;
+
+                    Array.Copy(evalBytes, 0, _output, outPtr, evalBytes.Length);
+                    outPtr += evalBytes.Length;
+
+                    srcPtr = match.Index + match.Value.Length;
                 }
 
                 // Wrap it up
-                Array.Copy(_source, _srcPtr, _output, _outPtr, _source.Length - _srcPtr);
+                Array.Copy(_source, srcPtr, _output, outPtr, _source.Length - srcPtr);
                 _built = true;
             }
 
