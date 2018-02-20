@@ -8,9 +8,9 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Diagnostics;
 
-namespace t4
+namespace c1g1c
 {
-    class Program
+    class t4
     {
         const string scopeRegex = @"(\$\(.*\))"; // $( exp )
         static void Main(string[] args)
@@ -26,26 +26,12 @@ namespace t4
             Task.WaitAll(maches.Select((m) => m.eval).ToArray());
             var matchResults = maches.Select(x => (match: x.match, evalResult: x.eval.Result.ToString().ToCharArray()));
 
-            // calculate new output length
-            var evalResultsLength = matchResults.Sum(a => a.evalResult.Length);
-            var evalsLength = matchResults.Sum(a => a.match.Value.Length);
-            var newOutputLength = (template.Length - evalsLength) + evalResultsLength;
-
             // go through maches and replace it with eval results
-            var outputBuffer = new OutputBuffer(template, newOutputLength);
+            var outputBuffer = new OutputBuffer(template, matchResults);
 
-            var enm = matchResults.GetEnumerator();
-            while (enm.MoveNext())
-            {
-                (Match match, char[] taskResult) = enm.Current;
-                outputBuffer.Add(match, taskResult);
-            }
-
-            outputBuffer.WrapUp();
-
-            stopWatch.Stop();
-            System.Console.WriteLine(TimeSpan.FromMilliseconds(stopWatch.ElapsedMilliseconds).Seconds);
             System.Console.WriteLine(outputBuffer.ToString());
+            System.Console.WriteLine(TimeSpan.FromMilliseconds(stopWatch.ElapsedMilliseconds).Seconds);
+            stopWatch.Stop();
         }
 
         public class OutputBuffer
@@ -53,16 +39,19 @@ namespace t4
             byte[] _source;
             byte[] _output;
             public Encoding DefaultEncoding = Encoding.UTF8;
+            IEnumerable<(Match, char[])> _enm;
 
-            public OutputBuffer(string s, int outputLen)
+            public OutputBuffer(string src, IEnumerable<(Match, char[])> enm)
             {
-                _source = Encoding.UTF8.GetBytes(s);
-                _output = new byte[outputLen];
+                _source = Encoding.UTF8.GetBytes(src);
+                _enm = enm;
             }
 
             long _srcPtr;
             long _outPtr;
-            public void Add(Match match, char[] evalResult)
+            private bool _built;
+
+            void Add(Match match, char[] evalResult)
             {
                 var evalBytes = DefaultEncoding.GetBytes(evalResult);
                 Array.Copy(_source, _srcPtr, _output, _outPtr, match.Index - _srcPtr);
@@ -76,16 +65,31 @@ namespace t4
 
             public override string ToString()
             {
-                return DefaultEncoding.GetString(Output);
+                if (!_built)
+                    Build();
+                return DefaultEncoding.GetString(_output);
             }
 
-            public void WrapUp()
+            void Build()
             {
-                // last match to the end of the file
+                // calculate new output length
+                var evalResultsLength = _enm.Sum(a => a.Item2.Length);
+                var evalsLength = _enm.Sum(a => a.Item1.Value.Length);
+                var newOutputLength = (_source.Length - evalsLength) + evalResultsLength;
+                _output = new byte[newOutputLength];
+
+                var e = _enm.GetEnumerator();
+                while (e.MoveNext())
+                {
+                    (Match match, char[] taskResult) = e.Current;
+                    Add(match, taskResult);
+                }
+
+                // Wrap it up
                 Array.Copy(_source, _srcPtr, _output, _outPtr, _source.Length - _srcPtr);
+                _built = true;
             }
 
-            public byte[] Output => _output;
 
 
         }
