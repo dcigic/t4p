@@ -24,7 +24,7 @@ namespace c1g1c
 
             // wait until evaluations are done and combine matches and evaluations results
             Task.WaitAll(maches.Select((m) => m.eval).ToArray());
-            var matchResults = maches.Select(x => (match: x.match, evalResult: x.eval.Result.ToString().ToCharArray()));
+            var matchResults = maches.Select(x => (match: x.match, evalResult: x.eval.Result));
 
             // go through maches and replace it with eval results
             var outputBuffer = new OutputBuffer(template, matchResults);
@@ -38,14 +38,20 @@ namespace c1g1c
         {
             byte[] _source;
             byte[] _output;
-            public Encoding DefaultEncoding = Encoding.UTF8;
-            IEnumerable<(Match, char[])> _enm;
-
-            public OutputBuffer(string src, IEnumerable<(Match, char[])> enm)
+            Encoding DefaultEncoding;
+            IEnumerable<(int, int, byte[])> _hits;
+            public OutputBuffer(string src, IEnumerable<(Match, object)> enm, Encoding enc = null)
+            : this(src, enm.Select(e => (e.Item1.Index, e.Item1.Length, e.Item2.ToString())))
             {
-                _source = Encoding.UTF8.GetBytes(src);
-                _enm = enm;
             }
+
+            public OutputBuffer(string src, IEnumerable<(int, int, string)> hits, Encoding enc = null)
+            {
+                DefaultEncoding = enc ?? Encoding.UTF8;
+                _source = DefaultEncoding.GetBytes(src);
+                _hits = hits.Select(h => (h.Item1, h.Item2, DefaultEncoding.GetBytes(h.Item3)));
+            }
+
             private bool _built;
 
             public override string ToString()
@@ -58,26 +64,25 @@ namespace c1g1c
             void Build()
             {
                 // calculate new output length
-                var evalResultsLength = _enm.Sum(a => a.Item2.Length);
-                var evalsLength = _enm.Sum(a => a.Item1.Value.Length);
+                var evalResultsLength = _hits.Sum(a => a.Item3.Length);
+                var evalsLength = _hits.Sum(a => a.Item2);
                 var newOutputLength = (_source.Length - evalsLength) + evalResultsLength;
                 _output = new byte[newOutputLength];
 
-                long srcPtr = 0;
-                long outPtr = 0;
-                var e = _enm.GetEnumerator();
+                int srcPtr = 0;
+                int outPtr = 0;
+                var e = _hits.GetEnumerator();
                 while (e.MoveNext())
                 {
-                    (Match match, char[] evalResult) = e.Current;
-                    var evalBytes = DefaultEncoding.GetBytes(evalResult);
+                    (int from, int length, byte[] evalResult) = e.Current;
 
-                    Array.Copy(_source, srcPtr, _output, outPtr, match.Index - srcPtr);
-                    outPtr += match.Index - srcPtr;
+                    Array.Copy(_source, srcPtr, _output, outPtr, from - srcPtr);
+                    outPtr += from - srcPtr;
 
-                    Array.Copy(evalBytes, 0, _output, outPtr, evalBytes.Length);
-                    outPtr += evalBytes.Length;
+                    Array.Copy(evalResult, 0, _output, outPtr, evalResult.Length);
+                    outPtr += evalResult.Length;
 
-                    srcPtr = match.Index + match.Value.Length;
+                    srcPtr = from + length;
                 }
 
                 // Wrap it up
