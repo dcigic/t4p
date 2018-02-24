@@ -80,7 +80,6 @@ namespace c1g1c
             refs.Add(MetadataReference.CreateFromFile(Path.Combine(assemblyPath, "System.dll")));
             refs.Add(MetadataReference.CreateFromFile(Path.Combine(assemblyPath, "System.Core.dll")));
             refs.Add(MetadataReference.CreateFromFile(Path.Combine(assemblyPath, "System.Runtime.dll")));
-            refs.Add(MetadataReference.CreateFromFile(Assembly.GetEntryAssembly().Location));
             refs.Add(Mscorlib);
             refs.Add(csl);
             var compilation = CSharpCompilation.Create("bla.dll", new[] { tree }, references: refs, options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
@@ -92,8 +91,6 @@ namespace c1g1c
             }
             Assembly asm =
             AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.GetFullPath("bla.dll"));
-            // Invoke the RoslynCore.Helper.CalculateCircleArea method passing an argument
-
             var result = asm.GetType("exp.Exp").GetMethod("Main2").
              Invoke(null, null);
             Console.WriteLine(result);
