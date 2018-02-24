@@ -1,3 +1,6 @@
 obj
 bin
 .vscode
+template
+template.g.cs
+bla.dll

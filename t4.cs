@@ -4,9 +4,12 @@ using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.CodeAnalysis.CSharp.Scripting;
+using Microsoft.CodeAnalysis;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Diagnostics;
+using Microsoft.CodeAnalysis.CSharp;
+using System.Reflection;
 
 namespace c1g1c
 {
@@ -20,89 +23,91 @@ namespace c1g1c
             // find script maches and shedule evaluation
             var template = File.ReadAllText("template");
             Func<string, string> strip = str => str.Remove(str.LastIndexOf(')'), 1).TrimStart('$', '(');
-            var maches = Regex.Matches(template, scopeRegex).Select((m) => (match: m, eval: CSharpScript.EvaluateAsync(strip(m.Value), globals: new Globals())));
+            var maches = Regex.Matches(template, scopeRegex);
 
-            // wait until evaluations are done and combine matches and evaluations results
-            Task.WaitAll(maches.Select((m) => m.eval).ToArray());
-            var matchResults = maches.Select(x => (match: x.match, evalResult: x.eval.Result));
+            var q = new Queue<Capture>();
 
-            // go through maches and replace it with eval results
-            var outputBuffer = new OutputBuffer(template, matchResults);
+            var lastPtr = 0;
 
-            System.Console.WriteLine(outputBuffer.ToString());
-            System.Console.WriteLine(TimeSpan.FromMilliseconds(stopWatch.ElapsedMilliseconds).Seconds);
-            stopWatch.Stop();
-        }
+            var firstCapture = template.Substring(0, maches.First().Index);
+            q.Enqueue(new Capture(false, firstCapture));
 
-        public class OutputBuffer
-        {
-            byte[] _source;
-            byte[] _output;
-            Encoding DefaultEncoding;
-            IEnumerable<(int, int, byte[])> _hits;
-            public OutputBuffer(string src, IEnumerable<(Match, object)> enm, Encoding enc = null)
-            : this(src, enm.Select(e => (e.Item1.Index, e.Item1.Length, e.Item2.ToString())))
+            foreach (Match m in maches)
             {
-            }
 
-            public OutputBuffer(string src, IEnumerable<(int, int, string)> hits, Encoding enc = null)
-            {
-                DefaultEncoding = enc ?? Encoding.UTF8;
-                _source = DefaultEncoding.GetBytes(src);
-                _hits = hits.Select(h => (h.Item1, h.Item2, DefaultEncoding.GetBytes(h.Item3)));
-            }
-
-            private bool _built;
-
-            public override string ToString()
-            {
-                if (!_built)
-                    Build();
-                return DefaultEncoding.GetString(_output);
-            }
-
-            void Build()
-            {
-                // calculate new output length
-                var evalResultsLength = _hits.Sum(a => a.Item3.Length);
-                var evalsLength = _hits.Sum(a => a.Item2);
-                var newOutputLength = (_source.Length - evalsLength) + evalResultsLength;
-                _output = new byte[newOutputLength];
-
-                int srcPtr = 0;
-                int outPtr = 0;
-                var e = _hits.GetEnumerator();
-                while (e.MoveNext())
+                q.Enqueue(new Capture(true, m.Value));
+                lastPtr = m.Index + m.Value.Length;
+                var nextPtr = m.NextMatch()?.Index ?? 0;
+                if (nextPtr != 0)
                 {
-                    (int from, int length, byte[] evalResult) = e.Current;
+                    var capture = template.Substring(lastPtr, nextPtr - lastPtr);
+                    q.Enqueue(new Capture(false, capture));
+                }
+            }
 
-                    Array.Copy(_source, srcPtr, _output, outPtr, from - srcPtr);
-                    outPtr += from - srcPtr;
+            var lastCapture = template.Substring(lastPtr, template.Length - lastPtr);
+            q.Enqueue(new Capture(false, lastCapture));
 
-                    Array.Copy(evalResult, 0, _output, outPtr, evalResult.Length);
-                    outPtr += evalResult.Length;
-
-                    srcPtr = from + length;
+            var output = File.CreateText("template.g.cs");
+            output.Write(@"namespace exp {");
+            output.Write(@"public class Exp {");
+            output.Write(@"public static void Main2(string[] args) {");
+            while (q.TryDequeue(out Capture c))
+            {
+                if (c.IsExpression)
+                {
+                    output.Write(strip(c.Value));
+                }
+                else
+                {
+                    output.Write($"System.Console.WriteLine(@\"{c.Value}\");");
                 }
 
-                // Wrap it up
-                Array.Copy(_source, srcPtr, _output, outPtr, _source.Length - srcPtr);
-                _built = true;
             }
+            output.Write(@"}");
+            output.Write(@"}");
+            output.Write(@"}");
+            output.Close();
 
 
+            // Detect the file location for the library that defines the object type
+            var systemRefLocation = typeof(object).GetType().Assembly.Location;
+            // Create a reference to the library
+            var systemReference = MetadataReference.CreateFromFile(systemRefLocation);
+            var fileName = "bla.dll";
+            var tree = SyntaxFactory.ParseSyntaxTree(File.ReadAllText("template.g.cs"));
+            var assemblyPath = Path.GetDirectoryName(typeof(object).GetTypeInfo().Assembly.Location);
+            var Mscorlib = MetadataReference.CreateFromFile(typeof(object).Assembly.Location);
+            var csl = MetadataReference.CreateFromFile(typeof(Console).Assembly.Location);
+            List<PortableExecutableReference> refs = new List<PortableExecutableReference>();
+            refs.Add(MetadataReference.CreateFromFile(Path.Combine(assemblyPath, "mscorlib.dll")));
+            refs.Add(MetadataReference.CreateFromFile(Path.Combine(assemblyPath, "System.dll")));
+            refs.Add(MetadataReference.CreateFromFile(Path.Combine(assemblyPath, "System.Core.dll")));
+            refs.Add(MetadataReference.CreateFromFile(Path.Combine(assemblyPath, "System.Runtime.dll")));
+            refs.Add(MetadataReference.CreateFromFile(Assembly.GetEntryAssembly().Location));
+            refs.Add(Mscorlib);
+            refs.Add(csl);
+            var compilation = CSharpCompilation.Create("bla.dll", new[] { tree }, references: refs, options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+            compilation.AddReferences(systemReference);
+            var emit = compilation.Emit(Path.Combine(Directory.GetCurrentDirectory(), fileName));
+            System.Console.WriteLine(emit.Success);
+            foreach (var d in emit.Diagnostics)
+            {
+                System.Console.WriteLine(d.GetMessage());
+            }
 
         }
 
-    }
+        struct Capture
+        {
+            public Capture(bool isExpression, string value)
+            {
+                IsExpression = isExpression;
+                Value = value;
+            }
+            public bool IsExpression { get; set; }
+            public string Value { get; set; }
+        }
 
-
-}
-
-public class Globals
-{
-    public string Write(object obj)
-    {
-        return obj.ToString();
     }
 }
