@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using System.Diagnostics;
 using Microsoft.CodeAnalysis.CSharp;
 using System.Reflection;
+using System.Runtime.Loader;
 
 namespace c1g1c
 {
@@ -51,7 +52,7 @@ namespace c1g1c
             var output = File.CreateText("template.g.cs");
             output.Write(@"namespace exp {");
             output.Write(@"public class Exp {");
-            output.Write(@"public static void Main2(string[] args) {");
+            output.Write(@"public static void Main2() {");
             while (q.TryDequeue(out Capture c))
             {
                 if (c.IsExpression)
@@ -69,11 +70,6 @@ namespace c1g1c
             output.Write(@"}");
             output.Close();
 
-
-            // Detect the file location for the library that defines the object type
-            var systemRefLocation = typeof(object).GetType().Assembly.Location;
-            // Create a reference to the library
-            var systemReference = MetadataReference.CreateFromFile(systemRefLocation);
             var fileName = "bla.dll";
             var tree = SyntaxFactory.ParseSyntaxTree(File.ReadAllText("template.g.cs"));
             var assemblyPath = Path.GetDirectoryName(typeof(object).GetTypeInfo().Assembly.Location);
@@ -88,13 +84,20 @@ namespace c1g1c
             refs.Add(Mscorlib);
             refs.Add(csl);
             var compilation = CSharpCompilation.Create("bla.dll", new[] { tree }, references: refs, options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
-            compilation.AddReferences(systemReference);
             var emit = compilation.Emit(Path.Combine(Directory.GetCurrentDirectory(), fileName));
             System.Console.WriteLine(emit.Success);
             foreach (var d in emit.Diagnostics)
             {
                 System.Console.WriteLine(d.GetMessage());
             }
+            Assembly asm =
+            AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.GetFullPath("bla.dll"));
+            // Invoke the RoslynCore.Helper.CalculateCircleArea method passing an argument
+
+            var result = asm.GetType("exp.Exp").GetMethod("Main2").
+             Invoke(null, null);
+            Console.WriteLine(result);
+
 
         }
 
