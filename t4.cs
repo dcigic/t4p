@@ -19,7 +19,7 @@ namespace c1g1c
     class T4
     {
         const string scopeRegex = @"(\$\(.*\))"; // $( exp )
-        private string _path;
+        private string _template;
         private Func<string> _Call;
         static void Main(string[] args)
         {
@@ -29,33 +29,32 @@ namespace c1g1c
                 Console.Error.WriteLine("ERROR: Missing template.");
                 return;
             }
-            var t4 = new T4(args[0]);
-            var call = t4.Build();
-            foreach (var item in Enumerable.Range(0, 10))
+            var src = File.ReadAllText(args[0]);
+            var consume = new T4(src).Build();
+
+            foreach (var item in Enumerable.Range(0, 100))
             {
-                var result = call();
+                var result = consume();
                 File.WriteAllText($"{args[0]}.g", result.ToString());
             }
 
         }
 
-        public T4(string path)
+        public T4(string template)
         {
-            _path = path;
+            _template = template;
         }
 
         public Func<string> Build()
-        {
-            var template = File.ReadAllText(_path); // make it args
-            var maches = Regex.Matches(template, scopeRegex);
-            var captures = GetCaptures(template, maches);
+        { 
+            var maches = Regex.Matches(_template, scopeRegex);
+            var captures = GetCaptures(_template, maches);
             var method = BuildMethod(captures);
             var tree = SyntaxFactory.ParseSyntaxTree(method);
             var compilation = GetCompilation(tree);
             var assembly = GetAssembly(compilation);
-            var result = GetCallable(assembly);
-            return result;
-
+            var callable = GetCallable(assembly);
+            return callable;
         }
 
         private static Func<string> GetCallable(Assembly assembly)
