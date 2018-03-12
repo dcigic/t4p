@@ -20,16 +20,23 @@ namespace c1g1c
     {
         const string scopeRegex = @"(\$\(.*\))"; // $( exp )
         private string _path;
-
+        private Func<string> _Call;
         static void Main(string[] args)
         {
-            args = new string[]{"template"};
-            if(!args.Any()){
+            args = new string[] { "template" };
+            if (!args.Any())
+            {
                 Console.Error.WriteLine("ERROR: Missing template.");
                 return;
             }
             var t4 = new T4(args[0]);
-            t4.Build();
+            var call = t4.Build();
+            foreach (var item in Enumerable.Range(0, 10))
+            {
+                var result = call();
+                File.WriteAllText($"{args[0]}.g", result.ToString());
+            }
+
         }
 
         public T4(string path)
@@ -37,7 +44,7 @@ namespace c1g1c
             _path = path;
         }
 
-        public void Build()
+        public Func<string> Build()
         {
             var template = File.ReadAllText(_path); // make it args
             var maches = Regex.Matches(template, scopeRegex);
@@ -46,14 +53,16 @@ namespace c1g1c
             var tree = SyntaxFactory.ParseSyntaxTree(method);
             var compilation = GetCompilation(tree);
             var assembly = GetAssembly(compilation);
-            var result = Call(assembly);
+            var result = GetCallable(assembly);
+            return result;
 
-            File.WriteAllText($"{_path}.g", result.ToString());
         }
 
-        private static object Call(Assembly assembly)
+        private static Func<string> GetCallable(Assembly assembly)
         {
-            return assembly.GetType("__nsp.__Tpe").GetMethod("__Call").Invoke(null, null);
+            var method = assembly.GetType("__nsp.__Tpe").GetMethod("__Call");
+            var dlg = (Func<string>)Delegate.CreateDelegate(typeof(Func<string>), method);
+            return dlg;
         }
 
         private static CSharpCompilation GetCompilation(SyntaxTree tree)
