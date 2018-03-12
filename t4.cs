@@ -11,91 +11,137 @@ using System.Diagnostics;
 using Microsoft.CodeAnalysis.CSharp;
 using System.Reflection;
 using System.Runtime.Loader;
+using System.Reflection.Metadata;
+using Microsoft.CodeAnalysis.Text;
 
 namespace c1g1c
 {
-    class t4
+    class T4
     {
         const string scopeRegex = @"(\$\(.*\))"; // $( exp )
+        private string _path;
+
         static void Main(string[] args)
         {
-            var stopWatch = Stopwatch.StartNew();
+            args = new string[]{"template"};
+            if(!args.Any()){
+                Console.Error.WriteLine("ERROR: Missing template.");
+                return;
+            }
+            var t4 = new T4(args[0]);
+            t4.Build();
+        }
 
-            // find script maches and shedule evaluation
-            var template = File.ReadAllText("template");
-            Func<string, string> strip = str => str.Remove(str.LastIndexOf(')'), 1).TrimStart('$', '(');
+        public T4(string path)
+        {
+            _path = path;
+        }
+
+        public void Build()
+        {
+            var template = File.ReadAllText(_path); // make it args
             var maches = Regex.Matches(template, scopeRegex);
+            var captures = GetCaptures(template, maches);
+            var method = BuildMethod(captures);
+            var tree = SyntaxFactory.ParseSyntaxTree(method);
+            var compilation = GetCompilation(tree);
+            var assembly = GetAssembly(compilation);
+            var result = Call(assembly);
 
-            var q = new Queue<Capture>();
+            File.WriteAllText($"{_path}.g", result.ToString());
+        }
+
+        private static object Call(Assembly assembly)
+        {
+            return assembly.GetType("__nsp.__Tpe").GetMethod("__Call").Invoke(null, null);
+        }
+
+        private static CSharpCompilation GetCompilation(SyntaxTree tree)
+        {
+            var refs = new List<PortableExecutableReference>();
+            AddReferences(refs);
+            return CSharpCompilation.Create(Path.GetRandomFileName(), new[] { tree }, refs, new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        }
+
+        private static Assembly GetAssembly(CSharpCompilation compilation)
+        {
+            using (var stream = new MemoryStream())
+            {
+                var emit = compilation.Emit(stream);
+                System.Console.WriteLine(emit.Success);// replace with NLog
+                foreach (var d in emit.Diagnostics)
+                {
+                    System.Console.WriteLine(d.GetMessage());
+                }
+                stream.Seek(0, SeekOrigin.Begin);
+                var bfr = new byte[stream.Length];
+                stream.Read(bfr, 0, bfr.Length);
+                return Assembly.Load(bfr);
+            }
+        }
+
+        private static Queue<Capture> GetCaptures(string template, MatchCollection maches)
+        {
+            var captures = new Queue<Capture>();
 
             var lastPtr = 0;
-
             var firstCapture = template.Substring(0, maches.First().Index);
-            q.Enqueue(new Capture(false, firstCapture));
+            captures.Enqueue(new Capture(false, firstCapture));
 
             foreach (Match m in maches)
             {
-
-                q.Enqueue(new Capture(true, m.Value));
+                captures.Enqueue(new Capture(true, m.Value));
                 lastPtr = m.Index + m.Value.Length;
                 var nextPtr = m.NextMatch()?.Index ?? 0;
                 if (nextPtr != 0)
                 {
                     var capture = template.Substring(lastPtr, nextPtr - lastPtr);
-                    q.Enqueue(new Capture(false, capture));
+                    captures.Enqueue(new Capture(false, capture));
                 }
             }
-
             var lastCapture = template.Substring(lastPtr, template.Length - lastPtr);
-            q.Enqueue(new Capture(false, lastCapture));
+            captures.Enqueue(new Capture(false, lastCapture));
 
-            var output = File.CreateText("template.g.cs");
-            output.Write(@"namespace exp {");
-            output.Write(@"public class Exp {");
-            output.Write(@"public static void Main2() {");
+            return captures;
+        }
+
+        private static string BuildMethod(Queue<Capture> q)
+        {
+            Func<string, string> strip = str => str.Remove(str.LastIndexOf(')'), 1).TrimStart('$', '(');
+
+            var output = new StringBuilder();
+            output.Append(@"namespace __nsp {");
+            output.Append(@"public class __Tpe {");
+            output.Append(@"public static string __Call() {");
+            output.Append(@"var buffer = new System.Text.StringBuilder(); ");
             while (q.TryDequeue(out Capture c))
             {
                 if (c.IsExpression)
                 {
-                    output.Write(strip(c.Value));
+                    output.Append(strip(c.Value));
                 }
                 else
                 {
-                    output.Write($"System.Console.WriteLine(@\"{c.Value}\");");
+                    output.Append($"buffer.Append(@\"{c.Value}\");");
                 }
-
             }
-            output.Write(@"}");
-            output.Write(@"}");
-            output.Write(@"}");
-            output.Close();
+            output.Append(@" return buffer.ToString();}");
+            output.Append(@"}");
+            output.Append(@"}");
 
-            var fileName = "bla.dll";
-            var tree = SyntaxFactory.ParseSyntaxTree(File.ReadAllText("template.g.cs"));
+            return output.ToString();
+        }
+
+        private static void AddReferences(List<PortableExecutableReference> refs)
+        {
             var assemblyPath = Path.GetDirectoryName(typeof(object).GetTypeInfo().Assembly.Location);
-            var Mscorlib = MetadataReference.CreateFromFile(typeof(object).Assembly.Location);
-            var csl = MetadataReference.CreateFromFile(typeof(Console).Assembly.Location);
-            List<PortableExecutableReference> refs = new List<PortableExecutableReference>();
             refs.Add(MetadataReference.CreateFromFile(Path.Combine(assemblyPath, "mscorlib.dll")));
             refs.Add(MetadataReference.CreateFromFile(Path.Combine(assemblyPath, "System.dll")));
             refs.Add(MetadataReference.CreateFromFile(Path.Combine(assemblyPath, "System.Core.dll")));
             refs.Add(MetadataReference.CreateFromFile(Path.Combine(assemblyPath, "System.Runtime.dll")));
-            refs.Add(Mscorlib);
-            refs.Add(csl);
-            var compilation = CSharpCompilation.Create("bla.dll", new[] { tree }, references: refs, options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
-            var emit = compilation.Emit(Path.Combine(Directory.GetCurrentDirectory(), fileName));
-            System.Console.WriteLine(emit.Success);
-            foreach (var d in emit.Diagnostics)
-            {
-                System.Console.WriteLine(d.GetMessage());
-            }
-            Assembly asm =
-            AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.GetFullPath("bla.dll"));
-            var result = asm.GetType("exp.Exp").GetMethod("Main2").
-             Invoke(null, null);
-            Console.WriteLine(result);
-
-
+            refs.Add(MetadataReference.CreateFromFile(typeof(object).Assembly.Location));
+            refs.Add(MetadataReference.CreateFromFile(typeof(Console).Assembly.Location)); // this will be user injected
+            refs.Add(MetadataReference.CreateFromFile(typeof(StringBuilder).Assembly.Location));
         }
 
         struct Capture
